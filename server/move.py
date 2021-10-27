@@ -2,7 +2,7 @@
 # File name   : move.py
 # Description : Control Motor
 # Product     : GWR
-# Website     : www.gewbot.com
+# Website     : www.gewbot.co
 # Author      : William
 # Date        : 2019/07/24
 import time

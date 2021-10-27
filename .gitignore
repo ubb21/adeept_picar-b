@@ -1,0 +1,14 @@
+sphinxbase.tar.gz
+move.py
+pocketsphinx-5prealpha/
+pocketsphinx.tar.gz
+sphinxbase-5prealpha/
+create_ap
+Fehlerkennung
+
+*.pyc
+LICENSE*
+*.weights
+*.jpg
+*.mkv
+*.avi

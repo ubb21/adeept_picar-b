@@ -7,11 +7,14 @@
 
 import time
 import threading
+
+import sqlalchemy
 import move
 import Adafruit_PCA9685
 import os
 import info
 import RPIservo
+import ultra
 
 import functions
 import robotLight
@@ -25,23 +28,22 @@ import websockets
 import json
 import app
 
-OLED_connection = 0
-'''
-try:
-	import OLED
-	screen = OLED.OLED_ctrl()
-	screen.start()
-	screen.screen_show(1, 'ADEEPT.COM')
-except:
-	OLED_connection = 0
-	print('OLED disconnected')
-	pass
-'''
+import webHelper
+
+# Arrays
+FuncEntscheider = []
+RobotEntscheider = []
+SwitchEntscheider = []
+configEntscheider = []
 
 functionMode = 0
 speed_set = 100
 rad = 0.5
 turnWiggle = 60
+
+manPlusModus = 0
+einrasten = 0
+blockForwardSetting = 0
 
 scGear = RPIservo.ServoCtrl()
 scGear.moveInit()
@@ -99,131 +101,250 @@ def FPV_thread():
 def ap_thread():
 	os.system("sudo create_ap wlan0 eth0 Adeept_Robot 12345678")
 
-
-def functionSelect(command_input, response):
-	global functionMode
-	if 'scan' == command_input:
-		if OLED_connection:
-			screen.screen_show(5,'SCANNING')
-		if modeSelect == 'PT':
+### Function Methoden ###
+def scanner(response,modeSelect):
+	if modeSelect == 'PT':
 			radar_send = fuc.radarScan()
-			print(radar_send)
 			response['title'] = 'scanResult'
 			response['data'] = radar_send
 			time.sleep(0.3)
 
-	elif 'findColor' == command_input:
-		if OLED_connection:
-			screen.screen_show(5,'FindColor')
-		if modeSelect == 'PT':
-			flask_app.modeselect('findColor')
+def findColor(response,modeSelect):
+	if modeSelect == 'PT':
+		flask_app.modeselect('findColor')
 
-	elif 'motionGet' == command_input:
-		if OLED_connection:
-			screen.screen_show(5,'MotionGet')
-		flask_app.modeselect('watchDog')
+def watchDog(response,modeSelect):
+	flask_app.modeselect('watchDog')
 
-	elif 'stopCV' == command_input:
-		flask_app.modeselect('none')
-		switch.switch(1,0)
-		switch.switch(2,0)
-		switch.switch(3,0)
-		move.motorStop()
+def stopCV(response,modeSelect):
+	flask_app.modeselect('none')
+	switch.switch(1,0)
+	switch.switch(2,0)
+	switch.switch(3,0)
+	move.motorStop()
 
-	elif 'KD' == command_input:
-		if OLED_connection:
-			screen.screen_show(5,'POLICE')
-		servoPosInit()
-		fuc.keepDistance()
-		RL.police()
+def KD(response,modeSelect):
+	servoPosInit()
+	fuc.keepDistance()
+	RL.police()
+
+def automaticOff(response,modeSelect):
+	RL.pause()
+	fuc.pause()
+	scGear.moveAngle(2,0)
+	move.motorStop()
+	time.sleep(0.3)
+	move.motorStop()
+
+def automatic(response,modeSelect):
+	RL.pause()
+	RL.breath(125,255,3)
+	if modeSelect == 'PT':
+		fuc.automatic()
+	else:
+		fuc.pause()
+
+def trackLine(response,modeSelect): # 
+	servoPosInit()
+	fuc.trackLine()
+
+def trackLineOff(response,modeSelect): # Äquivalent zu steadyCamera
+	fuc.pause()
+	move.motorStop(response,modeSelect)
+
+def steady_camera(response,modeSelect):
+	fuc.steady(T_sc.lastPos[2])
+
+def speech(response,modeSelect):
+	RL.both_off()
+	fuc.speech()
+
+def speech_off(response,modeSelect):
+	RL.both_off()
+	fuc.pause()
+	move.motorStop()
+	time.sleep(0.3)
+	move.motorStop()
+
+def kreis(response,modeSelect): # Kreisfahrmodus
+	RL.breath(0,85,128) # Dark cerulean
+	fuc.kreis_fahrmodus()
+
+def konst(response,modeSelect):
+	RL.breath(251,255,230) # Light yellow
+	fuc.konst_fahrmodus_v()
+
+def konst2(response,modeSelect):
+	RL.breath(150,0,4) # rot
+	fuc.konst_fahrmodus_r()
+
+def turnRight(response,modeSelect):
+	RL.breath(255,153,187) # Pastel magenta
+	RL.turnRight()
+	fuc.turnRight()
+
+def turnLeft(response,modeSelect):
+	RL.breath(153,25,0) # Rufous
+	RL.turnLeft()
+	fuc.turnLeft()
+
+def yolo(response,modeSelect):
+	RL.pause()
+	RL.both_on()
+	RL.setColor(24,255,0)
+	RL.breath(24,255,0) # Farbe: Hellgrün
+	fuc.yolo_start()
+
+def yolo_ad(response,modeSelect):
+	RL.pause()
+	RL.both_on()
+	RL.breath(255,178,0) # Farbe Dunkel Orange
+	RL.setColor(255,178,0)
+	fuc.yolo_advance_start()
+
+def man_plus(response,modeSelect):
+	global manPlusModus
+	print("Wechsel auf Manueller Plus Modus")
+	manPlusModus = 1
+
+def man(response,modeSelect):
+	global manPlusModus
+	print("Wechsel auf Manueller Modus")
+	manPlusModus = 0
+
+def room_scan(response,modeSelect):
+	RL.breath(204,0,102)
+	fuc.room_scan_start()
+
+def smart_scan(response,modeSelect):
+	RL.breath(179,179,255) # Pale cornflower blue
+	fuc.drive_room_scan_start()
+
+def alarmfunc(command_input,response):
+	""" Alarm Funktion starten """
+	print("ALARM")
+	fuc.alarm_start()
+	RL.breath(255,153,238) # Napier green
+
+def objectfunc(c,r):
+	""" Objekt Sammeln starten"""
+	print("Object Sammeln")
+	fuc.sammel_start()
+	RL.breath(68,102,0) # Lavender Rosa
+
+def init_function_entscheider():
+	if len(FuncEntscheider) == 0:
+		print("[API] init_function_entscheider")
+		# Voreingestellt
+		FuncEntscheider.append(webHelper.Entscheider('scan',scanner))
+		FuncEntscheider.append(webHelper.Entscheider('findColor',findColor))
+		FuncEntscheider.append(webHelper.Entscheider('motionGet',watchDog))
+		FuncEntscheider.append(webHelper.Entscheider('stopCV',stopCV))
+		FuncEntscheider.append(webHelper.Entscheider('KD',KD))
+		FuncEntscheider.append(webHelper.Entscheider('automaticOff',automaticOff))
+		FuncEntscheider.append(webHelper.Entscheider('automatic',automatic))
+		FuncEntscheider.append(webHelper.Entscheider('trackLine',trackLine))
+		FuncEntscheider.append(webHelper.Entscheider('trackLineOff',trackLineOff))
+		FuncEntscheider.append(webHelper.Entscheider('steadyCameraOff',trackLineOff))
+		FuncEntscheider.append(webHelper.Entscheider('steadyCamera',steady_camera))
+		FuncEntscheider.append(webHelper.Entscheider('speech',speech))
+		FuncEntscheider.append(webHelper.Entscheider('speechOff',speech_off))
+		
+		# Meine Modi
+		FuncEntscheider.append(webHelper.Entscheider('kreis',kreis)) # Kreisfahren
+		FuncEntscheider.append(webHelper.Entscheider('konst',konst)) # Vorwärtsfahren
+		FuncEntscheider.append(webHelper.Entscheider('konst2',konst2)) # Rückwärtsfahren
+		FuncEntscheider.append(webHelper.Entscheider('turnRight',turnRight)) # Rechts Kruve
+		FuncEntscheider.append(webHelper.Entscheider('turnLeft',turnLeft)) # Links Kurve
+		FuncEntscheider.append(webHelper.Entscheider('yolo',yolo)) # YOLO Nr. 1
+		FuncEntscheider.append(webHelper.Entscheider('yoloAD',yolo_ad)) # YOLO Nr. 2
+		FuncEntscheider.append(webHelper.Entscheider('roomScan',room_scan)) # Raum Scanner
+		FuncEntscheider.append(webHelper.Entscheider('manPlus',man_plus)) # Manueller Plus Modi
+		FuncEntscheider.append(webHelper.Entscheider('man',man)) # Manueller Modus
+		FuncEntscheider.append(webHelper.Entscheider('fahrScan',smart_scan)) # Smart Scann
+		# alarm ; Object
+		FuncEntscheider.append(webHelper.Entscheider('alarm',alarmfunc))
+		FuncEntscheider.append(webHelper.Entscheider('Object',objectfunc))
+
+def function_select(command_input, response):
+	global functionMode, manPlusModus
+	init_function_entscheider()
+	for option in FuncEntscheider:
+		if option.ispossible(command_input):
+			option.run2(response,modeSelect)		
 	
-	elif 'automaticOff' == command_input:
-		RL.pause()
-		fuc.pause()
-		move.motorStop()
-		time.sleep(0.3)
-		move.motorStop()
 
-	elif 'automatic' == command_input:
-		if OLED_connection:
-			screen.screen_show(5,'Automatic')
-		if modeSelect == 'PT':
-			fuc.automatic()
+### Switch Controll ###
+def Switch_1_on():
+	switch.switch(1,1)
+def Switch_1_off():
+	switch.switch(1,0)
+
+def Switch_2_on():
+	switch.switch(2,1)
+def Switch_2_off():
+	switch.switch(2,0)
+
+def Switch_3_on():
+	switch.switch(3,1)
+def Switch_3_off():
+	switch.switch(3,0) 
+
+
+def init_switch():
+	if len(SwitchEntscheider) == 0:
+		print("[API] init_switch")
+		SwitchEntscheider.append(webHelper.Entscheider('Switch_1_on',Switch_1_on))
+		SwitchEntscheider.append(webHelper.Entscheider('Switch_1_off',Switch_1_off))
+		SwitchEntscheider.append(webHelper.Entscheider('Switch_2_on',Switch_2_on))
+		SwitchEntscheider.append(webHelper.Entscheider('Switch_2_off',Switch_2_off))
+		SwitchEntscheider.append(webHelper.Entscheider('Switch_3_on',Switch_3_on))
+		SwitchEntscheider.append(webHelper.Entscheider('Switch_3_off',Switch_3_off))
+
+def switch_ctrl(command_input, response):
+	init_switch()
+	for option in SwitchEntscheider:
+		if option.ispossible(command_input):
+			option.run0()
+		
+
+
+### Robot Entscheider ###
+def forward():
+	global direction_command, manPlusModus,einrasten
+	direction_command = 'forward'
+	if manPlusModus == 1:
+		if einrasten == 0:
+			einrasten = 1
+			fuc.konst_fahrmodus_v()
 		else:
+			einrasten = 0
 			fuc.pause()
-
-	elif 'automaticOff' == command_input:
-		fuc.pause()
-		move.motorStop()
-		time.sleep(0.2)
-		move.motorStop()
-
-	elif 'trackLine' == command_input:
-		servoPosInit()
-		fuc.trackLine()
-		if OLED_connection:
-			screen.screen_show(5,'TrackLine')
-
-	elif 'trackLineOff' == command_input:
-		fuc.pause()
-		move.motorStop()
-
-	elif 'steadyCamera' == command_input:
-		if OLED_connection:
-			screen.screen_show(5,'SteadyCamera')
-		fuc.steady(T_sc.lastPos[2])
-
-	elif 'steadyCameraOff' == command_input:
-		fuc.pause()
-		move.motorStop()
-
-	elif 'speech' == command_input:
-		RL.both_off()
-		fuc.speech()
-
-	elif 'speechOff' == command_input:
-		RL.both_off()
-		fuc.pause()
-		move.motorStop()
-		time.sleep(0.3)
-		move.motorStop()
-
-
-def switchCtrl(command_input, response):
-	if 'Switch_1_on' in command_input:
-		switch.switch(1,1)
-
-	elif 'Switch_1_off' in command_input:
-		switch.switch(1,0)
-
-	elif 'Switch_2_on' in command_input:
-		switch.switch(2,1)
-
-	elif 'Switch_2_off' in command_input:
-		switch.switch(2,0)
-
-	elif 'Switch_3_on' in command_input:
-		switch.switch(3,1)
-
-	elif 'Switch_3_off' in command_input:
-		switch.switch(3,0) 
-
-
-def robotCtrl(command_input, response):
-	global direction_command, turn_command
-	if 'forward' == command_input:
-		direction_command = 'forward'
+	else:
 		move.motor_left(1, 0, speed_set)
 		move.motor_right(1, 0, speed_set)
-		RL.both_on()
-	
-	elif 'backward' == command_input:
-		direction_command = 'backward'
+	RL.both_on()
+	RL.breath(255,255,255)
+
+def backward():
+	global direction_command, einrasten, manPlusModus
+	direction_command = 'backward'
+	if manPlusModus == 1:
+		if einrasten == 0:
+			einrasten = 1
+			fuc.konst_fahrmodus_r()
+		else:
+			einrasten = 0
+			fuc.pause()
+	else:
 		move.motor_left(1, 1, speed_set)
 		move.motor_right(1, 1, speed_set)
-		RL.red()
+	RL.red()
+	RL.breath(255,0,0)
 
-	elif 'DS' in command_input:
+def ds():
+	global direction_command, manPlusModus
+	if manPlusModus == 0:
 		direction_command = 'no'
 		move.motorStop()
 		if turn_command == 'left':
@@ -235,111 +356,165 @@ def robotCtrl(command_input, response):
 		elif turn_command == 'no':
 			RL.both_off()
 
+# Bewege Vorderräder nach links
+def left():
+	global turn_command
+	turn_command = 'left'
+	scGear.moveAngle(2, 30)
+	RL.both_off()
+	RL.turnLeft()
 
-	elif 'left' == command_input:
-		turn_command = 'left'
-		scGear.moveAngle(2, 30)
+# Bewege Vorderräder nach rechts
+def right():
+	global turn_command
+	turn_command = 'right'
+	scGear.moveAngle(2,-30)
+	RL.both_off()
+	RL.turnRight()
+
+def ts():
+	global turn_command, direction_command
+	turn_command = 'no'
+	scGear.moveAngle(2, 0)
+	if direction_command == 'forward':
+		RL.both_on()
+	elif direction_command == 'backward':
 		RL.both_off()
-		RL.turnLeft()
-
-	elif 'right' == command_input:
-		turn_command = 'right'
-		scGear.moveAngle(2,-30)
+		RL.red()
+	elif direction_command == 'no':
 		RL.both_off()
-		RL.turnRight()
 
-	elif 'TS' in command_input:
-		turn_command = 'no'
-		scGear.moveAngle(2, 0)
-		if direction_command == 'forward':
-			RL.both_on()
-		elif direction_command == 'backward':
-			RL.both_off()
-			RL.red()
-		elif direction_command == 'no':
-			RL.both_off()
+def lookleft():
+	P_sc.singleServo(1, 1, 7)
 
+def lookright():
+	P_sc.singleServo(1,-1, 7)
 
-	elif 'lookleft' == command_input:
-		P_sc.singleServo(1, 1, 7)
+def lr_stop():
+	P_sc.stopWiggle()
 
-	elif 'lookright' == command_input:
-		P_sc.singleServo(1,-1, 7)
+def up():
+	T_sc.singleServo(0, -1, 7)
 
-	elif 'LRstop' in command_input:
-		P_sc.stopWiggle()
+def down():
+	T_sc.singleServo(0,1, 7)
 
+def ud_stop():
+	T_sc.stopWiggle()
 
-	elif 'up' == command_input:
-		T_sc.singleServo(0, 1, 7)
-
-	elif 'down' == command_input:
-		T_sc.singleServo(0,-1, 7)
-
-	elif 'UDstop' in command_input:
-		T_sc.stopWiggle()
+def home():
+	P_sc.moveServoInit([init_pwm1])
+	T_sc.moveServoInit([init_pwm0])
+	G_sc.moveServoInit([init_pwm2])
 
 
-	elif 'home' == command_input:
-		P_sc.moveServoInit([init_pwm1])
-		T_sc.moveServoInit([init_pwm0])
-		G_sc.moveServoInit([init_pwm2])
+
+def init_robot_ctrl():
+	global RobotEntscheider
+	if len(RobotEntscheider) == 0:
+		print("[API] init_robotCtrl")
+		RobotEntscheider.append(webHelper.Entscheider('forward',forward))
+		RobotEntscheider.append(webHelper.Entscheider('backward',backward))
+		RobotEntscheider.append(webHelper.Entscheider('DS',ds))
+		RobotEntscheider.append(webHelper.Entscheider('left',left))
+		RobotEntscheider.append(webHelper.Entscheider('right',right))
+		RobotEntscheider.append(webHelper.Entscheider('TS',ts))
+		RobotEntscheider.append(webHelper.Entscheider('lookleft',lookleft)) # Bewege Vorderräder nach links
+		RobotEntscheider.append(webHelper.Entscheider('lookright',lookright))
+		RobotEntscheider.append(webHelper.Entscheider('LRstop',lr_stop))
+		RobotEntscheider.append(webHelper.Entscheider('up',up)) # Bewege Vorderräder nach links
+		RobotEntscheider.append(webHelper.Entscheider('down',down))
+		RobotEntscheider.append(webHelper.Entscheider('UDstop',ud_stop))
+		RobotEntscheider.append(webHelper.Entscheider('home',home)) # Bewege Vorderräder nach links
 
 
+# Roboter Kontrolle
+def robot_ctrl(command_input, response):
+	global direction_command, turn_command, einrasten, manPlusModus, functionMode,speed_set
+	#print("webServer-robotCtrl: ",einrasten)
+	init_robot_ctrl()
+	for option in RobotEntscheider:
+		if option.ispossible(command_input):
+			option.run0()
+	
+### Config Entscheider ###
+def SiLeft(command_input):
+	global init_pwm0, init_pwm1, init_pwm2
+	numServo = int(command_input[7:])
+	if numServo == 0:
+		init_pwm0 -= 1
+		T_sc.setPWM(0,init_pwm0)
+	elif numServo == 1:
+		init_pwm1 -= 1
+		P_sc.setPWM(1,init_pwm1)
+	elif numServo == 2:
+		init_pwm2 -= 1
+		scGear.setPWM(2,init_pwm2)
+
+def SiRight(command_input):
+	global init_pwm0, init_pwm1, init_pwm2
+	numServo = int(command_input[8:])
+	if numServo == 0:
+		init_pwm0 += 1
+		T_sc.setPWM(0,init_pwm0)
+	elif numServo == 1:
+		init_pwm1 += 1
+		P_sc.setPWM(1,init_pwm1)
+	elif numServo == 2:
+		init_pwm2 += 1
+		scGear.setPWM(2,init_pwm2)
+
+def PWMMS(command_input):
+	global init_pwm0, init_pwm1, init_pwm2
+	numServo = int(command_input[6:])
+	if numServo == 0:
+		T_sc.initConfig(0, init_pwm0, 1)
+		replace_num('init_pwm0 = ', init_pwm0)
+	elif numServo == 1:
+		P_sc.initConfig(1, init_pwm1, 1)
+		replace_num('init_pwm1 = ', init_pwm1)
+	elif numServo == 2:
+		scGear.initConfig(2, init_pwm2, 2)
+		replace_num('init_pwm2 = ', init_pwm2)
+	
+def PWMINIT():
+	global init_pwm1
+	print(init_pwm1)
+	servoPosInit()
+
+def PWMD():
+	global init_pwm0, init_pwm1, init_pwm2, init_pwm3, init_pwm4
+	init_pwm0,init_pwm1,init_pwm2,init_pwm3,init_pwm4=300,300,300,300,300
+	T_sc.initConfig(0,300,1)
+	replace_num('init_pwm0 = ', 300)
+
+	P_sc.initConfig(1,300,1)
+	replace_num('init_pwm1 = ', 300)
+
+	scGear.initConfig(2,300,1)
+	replace_num('init_pwm2 = ', 300)
+
+
+def init_config():
+	if len(configEntscheider) == 0:
+		print("[API] init_config")
+		configEntscheider.append(webHelper.Entscheider('SiLeft',SiLeft))
+		configEntscheider.append(webHelper.Entscheider('SiRight',SiRight))
+		configEntscheider.append(webHelper.Entscheider('PWMMS',PWMMS))
+
+		configEntscheider.append(webHelper.Entscheider('PWMINIT',PWMINIT))
+		configEntscheider.append(webHelper.Entscheider('PWMD',PWMD))
+
+
+# Config PWN
 def configPWM(command_input, response):
 	global init_pwm0, init_pwm1, init_pwm2, init_pwm3, init_pwm4
+	init_config()
+	for option in configEntscheider:
+		if option.ispossible(command_input):
+			option.run1(command_input)
 
-	if 'SiLeft' in command_input:
-		numServo = int(command_input[7:])
-		if numServo == 0:
-			init_pwm0 -= 1
-			T_sc.setPWM(0,init_pwm0)
-		elif numServo == 1:
-			init_pwm1 -= 1
-			P_sc.setPWM(1,init_pwm1)
-		elif numServo == 2:
-			init_pwm2 -= 1
-			scGear.setPWM(2,init_pwm2)
-
-	if 'SiRight' in command_input:
-		numServo = int(command_input[8:])
-		if numServo == 0:
-			init_pwm0 += 1
-			T_sc.setPWM(0,init_pwm0)
-		elif numServo == 1:
-			init_pwm1 += 1
-			P_sc.setPWM(1,init_pwm1)
-		elif numServo == 2:
-			init_pwm2 += 1
-			scGear.setPWM(2,init_pwm2)
-
-	if 'PWMMS' in command_input:
-		numServo = int(command_input[6:])
-		if numServo == 0:
-			T_sc.initConfig(0, init_pwm0, 1)
-			replace_num('init_pwm0 = ', init_pwm0)
-		elif numServo == 1:
-			P_sc.initConfig(1, init_pwm1, 1)
-			replace_num('init_pwm1 = ', init_pwm1)
-		elif numServo == 2:
-			scGear.initConfig(2, init_pwm2, 2)
-			replace_num('init_pwm2 = ', init_pwm2)
-
-
-	if 'PWMINIT' == command_input:
-		print(init_pwm1)
-		servoPosInit()
-
-	elif 'PWMD' == command_input:
-		init_pwm0,init_pwm1,init_pwm2,init_pwm3,init_pwm4=300,300,300,300,300
-		T_sc.initConfig(0,300,1)
-		replace_num('init_pwm0 = ', 300)
-
-		P_sc.initConfig(1,300,1)
-		replace_num('init_pwm1 = ', 300)
-
-		scGear.initConfig(2,300,1)
-		replace_num('init_pwm2 = ', 300)
+		
 
 
 def update_code():
@@ -363,39 +538,21 @@ def wifi_check():
 		s.close()
 		print(ipaddr_check)
 		update_code()
-		if OLED_connection:
-			screen.screen_show(2, 'IP:'+ipaddr_check)
-			screen.screen_show(3, 'AP MODE OFF')
 	except:
-		ap_threading=threading.Thread(target=ap_thread)   #Define a thread for data receiving
-		ap_threading.setDaemon(True)                          #'True' means it is a front thread,it would close when the mainloop() closes
-		ap_threading.start()                                  #Thread starts
-		if OLED_connection:
-			screen.screen_show(2, 'AP Starting 10%')
+		#ap_threading=threading.Thread(target=ap_thread)   #Define a thread for data receiving
+		#ap_threading.ssetDaemon(True)                          #'True' means it is a front thread,it would close when the mainloop() closes
+		#ap_threading.start()                                  #Thread starts
 		RL.setColor(0,16,50)
 		time.sleep(1)
-		if OLED_connection:
-			screen.screen_show(2, 'AP Starting 30%')
 		RL.setColor(0,16,100)
 		time.sleep(1)
-		if OLED_connection:
-			screen.screen_show(2, 'AP Starting 50%')
 		RL.setColor(0,16,150)
 		time.sleep(1)
-		if OLED_connection:
-			screen.screen_show(2, 'AP Starting 70%')
 		RL.setColor(0,16,200)
 		time.sleep(1)
-		if OLED_connection:
-			screen.screen_show(2, 'AP Starting 90%')
 		RL.setColor(0,16,255)
 		time.sleep(1)
-		if OLED_connection:
-			screen.screen_show(2, 'AP Starting 100%')
 		RL.setColor(35,255,35)
-		if OLED_connection:
-			screen.screen_show(2, 'IP:192.168.12.1')
-			screen.screen_show(3, 'AP MODE ON')
 
 async def check_permit(websocket):
 	while True:
@@ -410,7 +567,7 @@ async def check_permit(websocket):
 			await websocket.send(response_str)
 
 async def recv_msg(websocket):
-	global speed_set, modeSelect
+	global speed_set, modeSelect, direction_command, turn_command
 	move.setup()
 	direction_command = 'no'
 	turn_command = 'no'
@@ -425,7 +582,9 @@ async def recv_msg(websocket):
 		data = ''
 		data = await websocket.recv()
 		try:
+			#print(data)
 			data = json.loads(data)
+			
 		except Exception as e:
 			print('not A JSON')
 
@@ -433,11 +592,14 @@ async def recv_msg(websocket):
 			continue
 
 		if isinstance(data,str):
-			robotCtrl(data, response)
+			if 'test' == data:
+				continue
 
-			switchCtrl(data, response)
+			robot_ctrl(data, response)
 
-			functionSelect(data, response)
+			switch_ctrl(data, response)
+
+			function_select(data, response)
 
 			configPWM(data, response)
 
@@ -445,6 +607,7 @@ async def recv_msg(websocket):
 				response['title'] = 'get_info'
 				response['data'] = [info.get_cpu_tempfunc(), info.get_cpu_use(), info.get_ram_info()]
 
+			# Speed einstellen
 			if 'wsB' in data:
 				try:
 					set_B=data.split()
@@ -496,15 +659,10 @@ async def recv_msg(websocket):
 				color = data['data']
 				flask_app.colorFindSet(color[0],color[1],color[2])
 
-		if not functionMode:
-			if OLED_connection:
-				screen.screen_show(5,'Functions OFF')
-		else:
-			pass
-
-		print(data)
+		#print(data)
 		response = json.dumps(response)
-		await websocket.send(response)
+		if websocket is not None:
+			await websocket.send(response)
 
 async def main_logic(websocket, path):
 	await check_permit(websocket)

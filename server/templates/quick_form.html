@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% import 'bootstrap/wtf.html' as wtf %}
+
+{% block app_content %}
+
+    {% if label %}<h2>{{label}}</h2>{% endif %}
+    <div class="row">
+        <div class="col-md-4">
+            {{ wtf.quick_form(form) }}
+        </div>
+    </div>
+    {% if info%} <br /> <pre>{{info}}</pre> {% endif %}
+
+    {% if message %}
+        {% for message in form.name.errors %}
+            {{ message }}
+        {% endfor %}
+    {% endif%}
+{% endblock %}

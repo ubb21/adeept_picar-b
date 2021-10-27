@@ -14,6 +14,8 @@ import imutils
 import robotLight
 import RPIservo
 
+import urs_config as hF
+
 led = robotLight.RobotLight()
 pid = PID.PID()
 pid.SetKp(0.5)
@@ -26,6 +28,9 @@ linePos_2 = 380
 lineColorSet = 255
 frameRender = 1
 findLineError = 20
+
+zahlerNewFoto = 0
+
 
 colorUpper = np.array([44, 255, 255])
 colorLower = np.array([24, 100, 100])
@@ -96,7 +101,7 @@ class CVThread(threading.Thread):
         self.CVMode = invar
         self.imgCV = imgInput
         self.resume()
-
+    
     def elementDraw(self,imgInput):
         if self.CVMode == 'none':
             pass
@@ -196,7 +201,6 @@ class CVThread(threading.Thread):
             # switch.switch(2,0)
             # switch.switch(3,0)
         self.pause()
-
 
     def findLineCtrl(self, posInput, setCenter):#2
         if posInput:
@@ -360,10 +364,7 @@ class CVThread(threading.Thread):
 class Camera(BaseCamera):
     video_source = 0
     modeSelect = 'none'
-    # modeSelect = 'findlineCV'
-    # modeSelect = 'findColor'
-    # modeSelect = 'watchDog'
-
+    # modeSelect = 'findlineCV' or 'findColor' or 'watchDog'
 
     def __init__(self):
         if os.environ.get('OPENCV_CAMERA_SOURCE'):
@@ -428,18 +429,27 @@ class Camera(BaseCamera):
 
     @staticmethod
     def frames():
+        global zahlerNewFoto
         camera = cv2.VideoCapture(Camera.video_source)
         camera.release()
         camera = cv2.VideoCapture(Camera.video_source)
         if not camera.isOpened():
-            raise RuntimeError('Could not start camera.')
+            raise RuntimeError('[Camera] Could not start camera.')
 
         cvt = CVThread()
         cvt.start()
 
         while True:
             # read current frame
-            _, img = camera.read()
+            ret, img = camera.read()
+            if zahlerNewFoto == 20:
+                text = "Mars Rover: " +str(time.time())
+                #                      Image, Text, Position,   Schrift-Art,            Schrift-Größe, Schrift-Farbe, Dicke,
+                img_text = cv2.putText(img, text,   (10, 470),  cv2.FONT_HERSHEY_SIMPLEX,   0.5,       (255,255,255),  1,  cv2.LINE_AA)
+                cv2.imwrite(hF.PIC_PATH,img_text)
+                zahlerNewFoto = 0
+                #print("[Camera] --> Foto geschossen")
+            zahlerNewFoto = zahlerNewFoto + 1
 
             if Camera.modeSelect == 'none':
                 switch.switch(1,0)
@@ -454,8 +464,6 @@ class Camera(BaseCamera):
                     img = cvt.elementDraw(img)
                 except:
                     pass
-            
-
 
             # encode as a jpeg image and return it
             if cv2.imencode('.jpg', img)[0]:
