@@ -1,5 +1,9 @@
 # Adeept Mars Rover Erweiterung
 
+## Yolo Installation
+Siehe unter: https://pjreddie.com/darknet/
+-> Auf einen leistungsstarken PC installieren.
+
 ## Neues 2. Dashboard
 Unter localhost:5000/dashboard zu finden.
 Von doer aus kann man die vieles einstellen. Man muss die E-Mail Konfiguration und/oder die Telegram Bot Konfiguration vornehmen.
